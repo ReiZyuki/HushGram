@@ -108,8 +108,10 @@ jobs:
             echo "::error::No .mpp bundle found in downloaded build artifact."
             exit 1
           fi
-          java -jar "$MORPHE_JAR" patch --patches "$BUNDLE" --out hushgram-patched.apk original-instagram.apk
-          test -s hushgram-patched.apk
+          java -jar "$MORPHE_JAR" patch -p "$BUNDLE" original-instagram.apk
+          PATCHED_APK="original-instagram-patched.apk"
+          test -s "$PATCHED_APK"
+          mv "$PATCHED_APK" hushgram-patched.apk
           unzip -t hushgram-patched.apk >/dev/null
           sha256sum hushgram-patched.apk | tee hushgram-patched.apk.sha256
 
