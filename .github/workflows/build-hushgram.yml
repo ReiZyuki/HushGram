@@ -95,7 +95,16 @@ jobs:
             https://*) ;;
             *) echo "::error::APK URL must use HTTPS."; exit 1 ;;
           esac
-          curl --fail --location --retry 3 --output original-instagram.apk "$APK_URL"
+          # APKMirror may reject command-line clients without browser-like headers.
+          # Its signed download keys can also expire; a fresh URL may be required.
+          curl --fail --location --retry 3 --retry-all-errors \\
+            --connect-timeout 20 --max-time 600 \\
+            --user-agent "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36" \\
+            --referer "https://www.apkmirror.com/" \\
+            --output original-instagram.apk "$APK_URL" || {
+              echo "::error::APK download failed. APKMirror may have expired the signed URL or blocked the runner (HTTP 403). Generate a fresh download URL, or use a trusted direct APK host."
+              exit 1
+            }
           test -s original-instagram.apk
           file original-instagram.apk
           if ! unzip -t original-instagram.apk >/dev/null 2>&1; then
