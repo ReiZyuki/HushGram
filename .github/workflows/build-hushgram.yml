@@ -1,13 +1,19 @@
-name: Build HushGram patch bundle
+name: Build and patch Instagram APK
 
 on:
   workflow_dispatch:
+    inputs:
+      apk_url:
+        description: "Direct HTTPS download URL for the original Instagram APK (version 450.0.0.50.77)"
+        required: true
+        type: string
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
-  build:
+  build-patches:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -27,11 +33,10 @@ jobs:
 
       - name: Check package registry credentials
         env:
-          GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ secrets.PATCHER_READ_TOKEN }}
         run: |
           if [ -z "$GITHUB_TOKEN" ]; then
-            echo "::error::Add a repository Actions secret named PATCHER_READ_TOKEN with read:packages permission."
+            echo "::error::Add repository Actions secret PATCHER_READ_TOKEN with read:packages permission."
             exit 1
           fi
 
@@ -41,16 +46,79 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.PATCHER_READ_TOKEN }}
         run: |
           chmod +x ./gradlew
-          ./gradlew :patches:generatePatchesList
-          ./gradlew :patches:buildAndroid
+          ./gradlew :patches:generatePatchesList :patches:buildAndroid
 
       - name: Upload patch bundle
         uses: actions/upload-artifact@v4
         with:
           name: HushGram-patch-bundle
           path: |
-            patches/build/release/*.mpp
-            patches/build/release/*.sha256
-            patches/build/release/*.cdx.json
+            patches/build/**/*.mpp
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 1
+
+  patch-apk:
+    needs: build-patches
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download HushGram patch bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: HushGram-patch-bundle
+          path: patches
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Download Morphe Desktop CLI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download --repo MorpheApp/morphe-desktop --pattern '*all.jar' --dir .
+          JAR="$(find . -maxdepth 1 -type f -name '*all.jar' -print -quit)"
+          if [ -z "$JAR" ]; then
+            echo "::error::Could not find Morphe Desktop CLI all-in-one JAR in the latest release."
+            exit 1
+          fi
+          echo "MORPHE_JAR=$JAR" >> "$GITHUB_ENV"
+
+      - name: Download original APK
+        env:
+          APK_URL: ${{ inputs.apk_url }}
+        run: |
+          case "$APK_URL" in
+            https://*) ;;
+            *) echo "::error::APK URL must use HTTPS."; exit 1 ;;
+          esac
+          curl --fail --location --retry 3 --output original-instagram.apk "$APK_URL"
+          test -s original-instagram.apk
+          file original-instagram.apk
+          if ! unzip -t original-instagram.apk >/dev/null 2>&1; then
+            echo "::error::Downloaded file is not a valid APK/ZIP. Use a direct APK download URL."
+            exit 1
+          fi
+
+      - name: Patch APK with HushGram
+        run: |
+          BUNDLE="$(find patches -type f -name '*.mpp' -print -quit)"
+          if [ -z "$BUNDLE" ]; then
+            echo "::error::No .mpp bundle found in downloaded build artifact."
+            exit 1
+          fi
+          java -jar "$MORPHE_JAR" patch --patches "$BUNDLE" --out hushgram-patched.apk original-instagram.apk
+          test -s hushgram-patched.apk
+          unzip -t hushgram-patched.apk >/dev/null
+          sha256sum hushgram-patched.apk | tee hushgram-patched.apk.sha256
+
+      - name: Upload patched APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: HushGram-patched-Instagram-APK
+          path: |
+            hushgram-patched.apk
+            hushgram-patched.apk.sha256
+          if-no-files-found: error
+          retention-days: 3
