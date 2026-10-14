@@ -91,30 +91,33 @@ jobs:
           fi
           echo "MORPHE_JAR=$JAR" >> "$GITHUB_ENV"
 
-      - name: Download original APK
+      - name: Download uploaded APK release asset
         env:
-          APK_URL: ${{ inputs.apk_url }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          APK_ASSET_NAME: ${{ inputs.apk_asset_name }}
         run: |
-          case "$APK_URL" in
-            https://*) ;;
-            *) echo "::error::APK URL must use HTTPS."; exit 1 ;;
-          esac
-          # APKMirror may reject command-line clients without browser-like headers.
-          # Its signed download keys can also expire; a fresh URL may be required.
-          curl --fail --location --retry 3 --retry-all-errors \
-            --connect-timeout 20 --max-time 600 \
-            --user-agent "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36" \
-            --referer "https://www.apkmirror.com/" \
-            --output original-instagram.apk "$APK_URL" || {
-              echo "::error::APK download failed. APKMirror may have expired the signed URL or blocked the runner (HTTP 403). Generate a fresh download URL, or use a trusted direct APK host."
-              exit 1
-            }
-          test -s original-instagram.apk
-          file original-instagram.apk
-          if ! unzip -t original-instagram.apk >/dev/null 2>&1; then
-            echo "::error::Downloaded file is not a valid APK/ZIP. Use a direct APK download URL."
+          # GitHub Actions workflow_dispatch has no native binary file-upload input.
+          # Upload the APK as an asset on an existing GitHub Release, then select it here.
+          gh release download "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "$APK_ASSET_NAME" \
+            --dir .
+          if [ ! -f "$APK_ASSET_NAME" ] || [ ! -s "$APK_ASSET_NAME" ]; then
+            echo "::error::Release asset '$APK_ASSET_NAME' was not downloaded. Check the release tag and exact asset filename."
             exit 1
           fi
+          mv "$APK_ASSET_NAME" original-instagram.apk
+          file original-instagram.apk
+          if ! unzip -t original-instagram.apk >/dev/null 2>&1; then
+            echo "::error::Uploaded file is not a valid ZIP/APK. Do not upload an XAPK container."
+            exit 1
+          fi
+          if ! unzip -Z1 original-instagram.apk | grep -qx 'AndroidManifest.xml'; then
+            echo "::error::No root AndroidManifest.xml found. This looks like an XAPK/split container, not a standalone base APK."
+            exit 1
+          fi
+          echo "Standalone APK archive validated."
 
       - name: Patch APK with HushGram
         run: |
