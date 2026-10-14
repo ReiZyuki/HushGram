@@ -3,8 +3,12 @@ name: Build and patch Instagram APK
 on:
   workflow_dispatch:
     inputs:
-      apk_url:
-        description: "Direct HTTPS download URL for the original Instagram APK (version 450.0.0.50.77)"
+      release_tag:
+        description: "Existing GitHub Release tag containing the APK asset (example: manual-apk)"
+        required: true
+        type: string
+      apk_asset_name:
+        description: "Exact uploaded APK asset filename (example: instagram.apk; do not use XAPK)"
         required: true
         type: string
 
